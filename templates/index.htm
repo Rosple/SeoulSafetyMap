@@ -1,0 +1,42 @@
+<!DOCTY0PE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>안전 귀가 지도</title>
+
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet/dist/leaflet.css"
+    />
+
+    <script
+        src="https://unpkg.com/leaflet/dist/leaflet.js">
+    </script>
+
+    <style>
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<script>
+var map = L.map('map').setView([37.5665, 126.9780], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: 'OpenStreetMap'
+}).addTo(map);
+
+L.marker([37.5665, 126.9780])
+    .addTo(map)
+    .bindPopup('서울시청')
+    .openPopup();
+</script>
+
+</body>
+</html>
