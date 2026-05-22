@@ -9,10 +9,38 @@ ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjMzMzljYTg2N
 def home():
     return render_template("index.html")
 
+@app.route("/geocode", methods=["POST"])
+def geocode():
+    data = request.json
+    text = data["text"]
+
+    url = "https://api.openrouteservice.org/geocode/search"
+
+    params = {
+        "api_key": ORS_API_KEY,
+        "text": text,
+        "boundary.country": "KR",
+        "size": 1
+    }
+
+    response = requests.get(url, params=params)
+    result = response.json()
+
+    if response.status_code != 200 or len(result.get("features", [])) == 0:
+        return jsonify({"error": True, "message": "주소를 찾지 못했습니다."}), 400
+
+    feature = result["features"][0]
+    lng, lat = feature["geometry"]["coordinates"]
+
+    return jsonify({
+        "lat": lat,
+        "lng": lng,
+        "label": feature["properties"].get("label", text)
+    })
+
 @app.route("/route", methods=["POST"])
 def route():
     data = request.json
-
     start = data["start"]
     end = data["end"]
 
@@ -39,10 +67,7 @@ def route():
     result = response.json()
 
     if response.status_code != 200:
-        return jsonify({
-            "error": True,
-            "message": result
-        }), 400
+        return jsonify({"error": True, "message": result}), 400
 
     routes = []
 
@@ -53,9 +78,7 @@ def route():
             "duration": feature["properties"]["summary"]["duration"]
         })
 
-    return jsonify({
-        "routes": routes
-    })
+    return jsonify({"routes": routes})
 
 if __name__ == "__main__":
     app.run(debug=True)

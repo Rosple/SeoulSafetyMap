@@ -19,7 +19,7 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            width: 330px;
+            width: 350px;
             max-height: 88vh;
             overflow-y: auto;
             background: white;
@@ -43,17 +43,19 @@
             cursor: pointer;
         }
 
+        .panel input, select {
+            width: 100%;
+            padding: 9px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            margin: 5px 0;
+        }
+
         .panel label {
             display: block;
             margin: 10px 0;
             font-size: 15px;
-        }
-
-        select {
-            width: 100%;
-            padding: 9px;
-            border-radius: 8px;
-            margin: 6px 0 10px 0;
         }
 
         #routeInfo {
@@ -70,12 +72,6 @@
             margin: 10px 0;
             font-size: 13px;
             line-height: 1.5;
-        }
-
-        .legend {
-            margin-top: 12px;
-            font-size: 13px;
-            line-height: 1.7;
         }
 
         .yellow-dot {
@@ -95,11 +91,9 @@
     <h2>안전 귀가 지도</h2>
     <p id="status">데이터 불러오는 중...</p>
 
-    <div class="score-box">
-        <b>안전 점수 기준</b><br>
-        가로등 1점 / CCTV 2점 / 안심벨 3점<br>
-        소방서 10점 / 경찰서 20점
-    </div>
+    <input id="startInput" placeholder="출발지 입력 예: 서울역">
+    <input id="endInput" placeholder="목적지 입력 예: 강남역">
+    <button id="searchRouteBtn">입력한 장소로 경로 찾기</button>
 
     <label><b>경로 추천 기준</b></label>
     <select id="routeMode">
@@ -111,6 +105,12 @@
     <button id="startBtn">출발지 직접 선택</button>
     <button id="endBtn">목적지 선택</button>
 
+    <div class="score-box">
+        <b>안전 점수 기준</b><br>
+        가로등 1점 / CCTV 2점 / 안심벨 3점<br>
+        소방서 10점 / 경찰서 20점
+    </div>
+
     <p id="routeInfo">출발지와 목적지를 선택하세요.</p>
 
     <label><input type="checkbox" id="cctvCheck" checked> CCTV 표시</label>
@@ -118,17 +118,6 @@
     <label><input type="checkbox" id="safetybellCheck" checked> 안심벨 표시</label>
     <label><input type="checkbox" id="policeCheck" checked> 경찰서 표시</label>
     <label><input type="checkbox" id="firestationCheck" checked> 소방서 표시</label>
-
-    <div class="legend">
-        📷 CCTV<br>
-        🟡 가로등<br>
-        🔔 안심벨<br>
-        🛡️ 경찰서<br>
-        🚒 소방서<br>
-        🟩 추천 경로<br>
-        🟧 비교 경로<br>
-        🟥 비교 경로
-    </div>
 </div>
 
 <div id="map"></div>
@@ -160,7 +149,7 @@ function makeImageIcon(imagePath, size) {
         iconUrl: imagePath,
         iconSize: [size, size],
         iconAnchor: [size / 2, size],
-        popupAnchor: [0, -size / 2]
+        popupAnchor: [0, -size]
     });
 }
 
@@ -182,11 +171,8 @@ function makeFacilityMarker(item, color, popupText) {
     }
 
     let iconSize = 34;
-
     if (popupText === "경찰서") iconSize = 60;
     if (popupText === "소방서") iconSize = 38;
-    if (popupText === "CCTV") iconSize = 34;
-    if (popupText === "안심벨") iconSize = 34;
 
     return L.marker([item.lat, item.lng], {
         icon: makeImageIcon(iconMap[popupText], iconSize)
@@ -195,11 +181,9 @@ function makeFacilityMarker(item, color, popupText) {
 
 function makeCluster(data, color, popupText) {
     var cluster = L.markerClusterGroup();
-
     data.forEach(function(item) {
         cluster.addLayer(makeFacilityMarker(item, color, popupText));
     });
-
     return cluster;
 }
 
@@ -242,10 +226,7 @@ function calculateSafetyScore(routeLatLngs, data, radiusMeter) {
 }
 
 fetch("/static/safety_data.json")
-    .then(function(response) {
-        if (!response.ok) throw new Error("JSON 파일을 불러오지 못했습니다.");
-        return response.json();
-    })
+    .then(response => response.json())
     .then(function(data) {
         data.police = data.police || [];
         data.firestation = data.firestation || [];
@@ -297,11 +278,77 @@ fetch("/static/safety_data.json")
         let endPoint = null;
 
         function clearRoutes() {
-            routeLines.forEach(function(line) {
-                map.removeLayer(line);
-            });
+            routeLines.forEach(line => map.removeLayer(line));
             routeLines = [];
         }
+
+        function setStartPoint(lat, lng, label) {
+            startPoint = L.latLng(lat, lng);
+            if (startMarker) map.removeLayer(startMarker);
+            clearRoutes();
+
+            startMarker = L.marker(startPoint)
+                .addTo(map)
+                .bindPopup(label || "출발지")
+                .openPopup();
+
+            map.setView(startPoint, 16);
+        }
+
+        function setEndPoint(lat, lng, label) {
+            endPoint = L.latLng(lat, lng);
+            if (endMarker) map.removeLayer(endMarker);
+            clearRoutes();
+
+            endMarker = L.marker(endPoint)
+                .addTo(map)
+                .bindPopup(label || "목적지")
+                .openPopup();
+
+            map.setView(endPoint, 16);
+        }
+
+        async function geocodePlace(text) {
+            const response = await fetch("/geocode", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: text })
+            });
+
+            if (!response.ok) {
+                throw new Error("주소 검색 실패");
+            }
+
+            return await response.json();
+        }
+
+        document.getElementById("searchRouteBtn").addEventListener("click", async function() {
+            const startText = document.getElementById("startInput").value.trim();
+            const endText = document.getElementById("endInput").value.trim();
+
+            if (!startText || !endText) {
+                document.getElementById("routeInfo").innerText =
+                    "출발지와 목적지를 모두 입력해주세요.";
+                return;
+            }
+
+            try {
+                document.getElementById("routeInfo").innerText =
+                    "주소를 좌표로 변환하는 중...";
+
+                const startResult = await geocodePlace(startText);
+                const endResult = await geocodePlace(endText);
+
+                setStartPoint(startResult.lat, startResult.lng, "출발지<br>" + startResult.label);
+                setEndPoint(endResult.lat, endResult.lng, "목적지<br>" + endResult.label);
+
+                drawMultipleRoutes(data);
+            } catch (error) {
+                console.error(error);
+                document.getElementById("routeInfo").innerText =
+                    "주소를 찾지 못했습니다. 더 구체적으로 입력해보세요.";
+            }
+        });
 
         document.getElementById("currentLocationBtn").addEventListener("click", function() {
             if (!navigator.geolocation) {
@@ -315,44 +362,33 @@ fetch("/static/safety_data.json")
 
             navigator.geolocation.getCurrentPosition(
                 function(position) {
-                    startPoint = L.latLng(
+                    setStartPoint(
                         position.coords.latitude,
-                        position.coords.longitude
+                        position.coords.longitude,
+                        "현재 위치"
                     );
-
-                    if (startMarker) map.removeLayer(startMarker);
-                    clearRoutes();
-
-                    startMarker = L.marker(startPoint)
-                        .addTo(map)
-                        .bindPopup("현재 위치")
-                        .openPopup();
-
-                    map.setView(startPoint, 16);
 
                     document.getElementById("routeInfo").innerText =
                         "현재 위치가 출발지로 설정되었습니다. 목적지를 선택하세요.";
                 },
                 function(error) {
                     document.getElementById("routeInfo").innerText =
-                        "현재 위치를 가져오지 못했습니다. 브라우저 위치 권한을 허용해주세요.";
+                        "현재 위치를 가져오지 못했습니다. 위치 권한을 허용해주세요.";
                 },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
             );
         });
 
         document.getElementById("startBtn").addEventListener("click", function() {
             mode = "start";
-            document.getElementById("routeInfo").innerText = "지도에서 출발지를 클릭하세요.";
+            document.getElementById("routeInfo").innerText =
+                "지도에서 출발지를 클릭하세요.";
         });
 
         document.getElementById("endBtn").addEventListener("click", function() {
             mode = "end";
-            document.getElementById("routeInfo").innerText = "지도에서 목적지를 클릭하세요.";
+            document.getElementById("routeInfo").innerText =
+                "지도에서 목적지를 클릭하세요.";
         });
 
         document.getElementById("routeMode").addEventListener("change", function() {
@@ -363,32 +399,14 @@ fetch("/static/safety_data.json")
 
         map.on("click", function(e) {
             if (mode === "start") {
-                startPoint = e.latlng;
-
-                if (startMarker) map.removeLayer(startMarker);
-                clearRoutes();
-
-                startMarker = L.marker(startPoint)
-                    .addTo(map)
-                    .bindPopup("출발지")
-                    .openPopup();
-
+                setStartPoint(e.latlng.lat, e.latlng.lng, "출발지");
                 mode = null;
                 document.getElementById("routeInfo").innerText =
                     "출발지 선택 완료. 목적지를 선택하세요.";
             }
 
             else if (mode === "end") {
-                endPoint = e.latlng;
-
-                if (endMarker) map.removeLayer(endMarker);
-                clearRoutes();
-
-                endMarker = L.marker(endPoint)
-                    .addTo(map)
-                    .bindPopup("목적지")
-                    .openPopup();
-
+                setEndPoint(e.latlng.lat, e.latlng.lng, "목적지");
                 mode = null;
                 drawMultipleRoutes(data);
             }
@@ -410,10 +428,7 @@ fetch("/static/safety_data.json")
                     end: { lat: endPoint.lat, lng: endPoint.lng }
                 })
             })
-            .then(function(response) {
-                if (!response.ok) throw new Error("경로 API 요청 실패");
-                return response.json();
-            })
+            .then(response => response.json())
             .then(function(routeData) {
                 if (!routeData.routes || routeData.routes.length === 0) {
                     throw new Error("경로를 찾지 못했습니다.");
@@ -429,7 +444,6 @@ fetch("/static/safety_data.json")
                     let safetyResult = calculateSafetyScore(routeLatLngs, data, 300);
 
                     routeResults.push({
-                        originalIndex: index,
                         latlngs: routeLatLngs,
                         distance: route.distance,
                         duration: route.duration,
@@ -441,13 +455,9 @@ fetch("/static/safety_data.json")
                 const selectedMode = document.getElementById("routeMode").value;
 
                 if (selectedMode === "shortest") {
-                    routeResults.sort(function(a, b) {
-                        return a.distance - b.distance;
-                    });
+                    routeResults.sort((a, b) => a.distance - b.distance);
                 } else {
-                    routeResults.sort(function(a, b) {
-                        return b.score - a.score;
-                    });
+                    routeResults.sort((a, b) => b.score - a.score);
                 }
 
                 const colors = ["green", "orange", "red"];
@@ -461,9 +471,6 @@ fetch("/static/safety_data.json")
 
                     line.bindPopup(
                         (i + 1) + "위 경로<br>" +
-                        "추천 기준: " +
-                        (selectedMode === "shortest" ? "최단거리" : "최안전") +
-                        "<br>" +
                         "안전 점수: " + result.score + "점<br>" +
                         "거리: " + Math.round(result.distance) + "m<br>" +
                         "예상 시간: " + Math.round(result.duration / 60) + "분"
@@ -500,7 +507,7 @@ fetch("/static/safety_data.json")
             .catch(function(error) {
                 console.error(error);
                 document.getElementById("routeInfo").innerText =
-                    "경로를 불러오지 못했습니다. 출발지와 목적지를 다시 선택해보세요.";
+                    "경로를 불러오지 못했습니다.";
             });
         }
     })
