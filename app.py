@@ -1,14 +1,19 @@
 from flask import Flask, render_template, request, jsonify
 import requests
+import os
 
 app = Flask(__name__)
 
-ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjMzMzljYTg2NzYzYjQ0ZTI4ZjQ4NjY2Mjc2YTMxYjU5IiwiaCI6Im11cm11cjY0In0="
+# Render Environment Variable 사용
+ORS_API_KEY = os.environ.get("ORS_API_KEY")
+
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
+
+# 주소 → 좌표 변환
 @app.route("/geocode", methods=["POST"])
 def geocode():
     data = request.json
@@ -27,7 +32,10 @@ def geocode():
     result = response.json()
 
     if response.status_code != 200 or len(result.get("features", [])) == 0:
-        return jsonify({"error": True, "message": "주소를 찾지 못했습니다."}), 400
+        return jsonify({
+            "error": True,
+            "message": "주소를 찾지 못했습니다."
+        }), 400
 
     feature = result["features"][0]
     lng, lat = feature["geometry"]["coordinates"]
@@ -38,9 +46,12 @@ def geocode():
         "label": feature["properties"].get("label", text)
     })
 
+
+# 경로 탐색
 @app.route("/route", methods=["POST"])
 def route():
     data = request.json
+
     start = data["start"]
     end = data["end"]
 
@@ -67,7 +78,10 @@ def route():
     result = response.json()
 
     if response.status_code != 200:
-        return jsonify({"error": True, "message": result}), 400
+        return jsonify({
+            "error": True,
+            "message": result
+        }), 400
 
     routes = []
 
@@ -78,7 +92,10 @@ def route():
             "duration": feature["properties"]["summary"]["duration"]
         })
 
-    return jsonify({"routes": routes})
+    return jsonify({
+        "routes": routes
+    })
+
 
 if __name__ == "__main__":
     app.run(debug=True)
