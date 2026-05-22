@@ -12,21 +12,14 @@
     <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
 
     <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-        }
-
-        #map {
-            width: 100%;
-            height: 100vh;
-        }
+        body { margin: 0; font-family: Arial, sans-serif; }
+        #map { width: 100%; height: 100vh; }
 
         .panel {
             position: absolute;
             top: 20px;
             left: 20px;
-            width: 320px;
+            width: 330px;
             max-height: 88vh;
             overflow-y: auto;
             background: white;
@@ -36,9 +29,7 @@
             box-shadow: 0 4px 20px rgba(0,0,0,0.25);
         }
 
-        .panel h2 {
-            margin: 0 0 12px 0;
-        }
+        .panel h2 { margin: 0 0 12px 0; }
 
         .panel button {
             width: 100%;
@@ -58,17 +49,18 @@
             font-size: 15px;
         }
 
+        select {
+            width: 100%;
+            padding: 9px;
+            border-radius: 8px;
+            margin: 6px 0 10px 0;
+        }
+
         #routeInfo {
             font-size: 14px;
             line-height: 1.55;
             font-weight: bold;
             white-space: pre-line;
-        }
-
-        .legend {
-            margin-top: 12px;
-            font-size: 13px;
-            line-height: 1.7;
         }
 
         .score-box {
@@ -78,6 +70,21 @@
             margin: 10px 0;
             font-size: 13px;
             line-height: 1.5;
+        }
+
+        .legend {
+            margin-top: 12px;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        .yellow-dot {
+            width: 18px;
+            height: 18px;
+            background: #ffd400;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
         }
     </style>
 </head>
@@ -94,7 +101,14 @@
         소방서 10점 / 경찰서 20점
     </div>
 
-    <button id="startBtn">출발지 선택</button>
+    <label><b>경로 추천 기준</b></label>
+    <select id="routeMode">
+        <option value="safest">최안전 경로 우선</option>
+        <option value="shortest">최단거리 경로 우선</option>
+    </select>
+
+    <button id="currentLocationBtn">현재 위치를 출발지로 설정</button>
+    <button id="startBtn">출발지 직접 선택</button>
     <button id="endBtn">목적지 선택</button>
 
     <p id="routeInfo">출발지와 목적지를 선택하세요.</p>
@@ -106,14 +120,14 @@
     <label><input type="checkbox" id="firestationCheck" checked> 소방서 표시</label>
 
     <div class="legend">
-        🔵 CCTV<br>
-        🟠 가로등<br>
-        🟢 안심벨<br>
-        🟣 경찰서<br>
-        🔴 소방서<br>
-        🟩 안전 점수 1위 경로<br>
-        🟧 안전 점수 2위 경로<br>
-        🟥 안전 점수 3위 경로
+        📷 CCTV<br>
+        🟡 가로등<br>
+        🔔 안심벨<br>
+        🛡️ 경찰서<br>
+        🚒 소방서<br>
+        🟩 추천 경로<br>
+        🟧 비교 경로<br>
+        🟥 비교 경로
     </div>
 </div>
 
@@ -134,13 +148,48 @@ const SAFETY_WEIGHTS = {
     firestation: 10
 };
 
-function makeCircleMarker(item, color, popupText) {
-    return L.circleMarker([item.lat, item.lng], {
-        radius: 5,
-        color: color,
-        fillColor: color,
-        fillOpacity: 0.75,
-        weight: 1
+const iconMap = {
+    "CCTV": "/static/icons/cctv.png",
+    "안심벨": "/static/icons/safetybell.png",
+    "경찰서": "/static/icons/police.png",
+    "소방서": "/static/icons/firestation.png"
+};
+
+function makeImageIcon(imagePath, size) {
+    return L.icon({
+        iconUrl: imagePath,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size],
+        popupAnchor: [0, -size / 2]
+    });
+}
+
+function makeStreetlightIcon() {
+    return L.divIcon({
+        html: '<div class="yellow-dot"></div>',
+        className: "",
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+        popupAnchor: [0, -12]
+    });
+}
+
+function makeFacilityMarker(item, color, popupText) {
+    if (popupText === "가로등") {
+        return L.marker([item.lat, item.lng], {
+            icon: makeStreetlightIcon()
+        }).bindPopup("가로등");
+    }
+
+    let iconSize = 34;
+
+    if (popupText === "경찰서") iconSize = 60;
+    if (popupText === "소방서") iconSize = 38;
+    if (popupText === "CCTV") iconSize = 34;
+    if (popupText === "안심벨") iconSize = 34;
+
+    return L.marker([item.lat, item.lng], {
+        icon: makeImageIcon(iconMap[popupText], iconSize)
     }).bindPopup(item.name ? popupText + "<br>" + item.name : popupText);
 }
 
@@ -148,7 +197,7 @@ function makeCluster(data, color, popupText) {
     var cluster = L.markerClusterGroup();
 
     data.forEach(function(item) {
-        cluster.addLayer(makeCircleMarker(item, color, popupText));
+        cluster.addLayer(makeFacilityMarker(item, color, popupText));
     });
 
     return cluster;
@@ -189,17 +238,12 @@ function calculateSafetyScore(routeLatLngs, data, radiusMeter) {
         counts.police * SAFETY_WEIGHTS.police +
         counts.firestation * SAFETY_WEIGHTS.firestation;
 
-    return {
-        counts: counts,
-        score: score
-    };
+    return { counts: counts, score: score };
 }
 
 fetch("/static/safety_data.json")
     .then(function(response) {
-        if (!response.ok) {
-            throw new Error("JSON 파일을 불러오지 못했습니다.");
-        }
+        if (!response.ok) throw new Error("JSON 파일을 불러오지 못했습니다.");
         return response.json();
     })
     .then(function(data) {
@@ -252,6 +296,55 @@ fetch("/static/safety_data.json")
         let startPoint = null;
         let endPoint = null;
 
+        function clearRoutes() {
+            routeLines.forEach(function(line) {
+                map.removeLayer(line);
+            });
+            routeLines = [];
+        }
+
+        document.getElementById("currentLocationBtn").addEventListener("click", function() {
+            if (!navigator.geolocation) {
+                document.getElementById("routeInfo").innerText =
+                    "현재 위치 기능을 지원하지 않는 브라우저입니다.";
+                return;
+            }
+
+            document.getElementById("routeInfo").innerText =
+                "현재 위치를 가져오는 중...";
+
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    startPoint = L.latLng(
+                        position.coords.latitude,
+                        position.coords.longitude
+                    );
+
+                    if (startMarker) map.removeLayer(startMarker);
+                    clearRoutes();
+
+                    startMarker = L.marker(startPoint)
+                        .addTo(map)
+                        .bindPopup("현재 위치")
+                        .openPopup();
+
+                    map.setView(startPoint, 16);
+
+                    document.getElementById("routeInfo").innerText =
+                        "현재 위치가 출발지로 설정되었습니다. 목적지를 선택하세요.";
+                },
+                function(error) {
+                    document.getElementById("routeInfo").innerText =
+                        "현재 위치를 가져오지 못했습니다. 브라우저 위치 권한을 허용해주세요.";
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        });
+
         document.getElementById("startBtn").addEventListener("click", function() {
             mode = "start";
             document.getElementById("routeInfo").innerText = "지도에서 출발지를 클릭하세요.";
@@ -262,18 +355,18 @@ fetch("/static/safety_data.json")
             document.getElementById("routeInfo").innerText = "지도에서 목적지를 클릭하세요.";
         });
 
+        document.getElementById("routeMode").addEventListener("change", function() {
+            if (startPoint && endPoint) {
+                drawMultipleRoutes(data);
+            }
+        });
+
         map.on("click", function(e) {
             if (mode === "start") {
                 startPoint = e.latlng;
 
-                if (startMarker) {
-                    map.removeLayer(startMarker);
-                }
-
-                routeLines.forEach(function(line) {
-                    map.removeLayer(line);
-                });
-                routeLines = [];
+                if (startMarker) map.removeLayer(startMarker);
+                clearRoutes();
 
                 startMarker = L.marker(startPoint)
                     .addTo(map)
@@ -288,14 +381,8 @@ fetch("/static/safety_data.json")
             else if (mode === "end") {
                 endPoint = e.latlng;
 
-                if (endMarker) {
-                    map.removeLayer(endMarker);
-                }
-
-                routeLines.forEach(function(line) {
-                    map.removeLayer(line);
-                });
-                routeLines = [];
+                if (endMarker) map.removeLayer(endMarker);
+                clearRoutes();
 
                 endMarker = L.marker(endPoint)
                     .addTo(map)
@@ -313,31 +400,18 @@ fetch("/static/safety_data.json")
             document.getElementById("routeInfo").innerText =
                 "여러 경로를 분석하는 중...";
 
-            routeLines.forEach(function(line) {
-                map.removeLayer(line);
-            });
-            routeLines = [];
+            clearRoutes();
 
             fetch("/route", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    start: {
-                        lat: startPoint.lat,
-                        lng: startPoint.lng
-                    },
-                    end: {
-                        lat: endPoint.lat,
-                        lng: endPoint.lng
-                    }
+                    start: { lat: startPoint.lat, lng: startPoint.lng },
+                    end: { lat: endPoint.lat, lng: endPoint.lng }
                 })
             })
             .then(function(response) {
-                if (!response.ok) {
-                    throw new Error("경로 API 요청 실패");
-                }
+                if (!response.ok) throw new Error("경로 API 요청 실패");
                 return response.json();
             })
             .then(function(routeData) {
@@ -352,11 +426,7 @@ fetch("/static/safety_data.json")
                         return [coord[1], coord[0]];
                     });
 
-                    let safetyResult = calculateSafetyScore(
-                        routeLatLngs,
-                        data,
-                        300
-                    );
+                    let safetyResult = calculateSafetyScore(routeLatLngs, data, 300);
 
                     routeResults.push({
                         originalIndex: index,
@@ -368,9 +438,17 @@ fetch("/static/safety_data.json")
                     });
                 });
 
-                routeResults.sort(function(a, b) {
-                    return b.score - a.score;
-                });
+                const selectedMode = document.getElementById("routeMode").value;
+
+                if (selectedMode === "shortest") {
+                    routeResults.sort(function(a, b) {
+                        return a.distance - b.distance;
+                    });
+                } else {
+                    routeResults.sort(function(a, b) {
+                        return b.score - a.score;
+                    });
+                }
 
                 const colors = ["green", "orange", "red"];
 
@@ -383,6 +461,9 @@ fetch("/static/safety_data.json")
 
                     line.bindPopup(
                         (i + 1) + "위 경로<br>" +
+                        "추천 기준: " +
+                        (selectedMode === "shortest" ? "최단거리" : "최안전") +
+                        "<br>" +
                         "안전 점수: " + result.score + "점<br>" +
                         "거리: " + Math.round(result.distance) + "m<br>" +
                         "예상 시간: " + Math.round(result.duration / 60) + "분"
@@ -391,11 +472,14 @@ fetch("/static/safety_data.json")
                     routeLines.push(line);
                 });
 
-                map.fitBounds(
-                    L.polyline(routeResults[0].latlngs).getBounds()
-                );
+                map.fitBounds(L.polyline(routeResults[0].latlngs).getBounds());
 
-                let text = "경로 비교 결과\n\n";
+                let title =
+                    selectedMode === "shortest"
+                    ? "최단거리 기준 경로 비교 결과"
+                    : "최안전 기준 경로 비교 결과";
+
+                let text = title + "\n\n";
 
                 routeResults.forEach(function(result, i) {
                     text +=
