@@ -26,59 +26,9 @@
             position: absolute;
             top: 20px;
             left: 20px;
-            width: 280px;
-            background: white;
-            z-index: 1000;
-            padding: 18px;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-        }
-
-        .panel h2 {
-            margin: 0 0 12px 0;
-        }
-
-        .panel label {
-            display: block;
-            margin: 10px 0;
-            font-size: 15px;
-        }
-
-        .legend {
-            margin-top: 12px;
-            font-size: 13px;
-            line-height: 1.6;
-        }
-    </style>
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>안전 귀가 지도</title>
-
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css">
-    <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-
-    <style>
-        body {
-            margin: 0;
-            font-family: Arial, sans-serif;
-        }
-
-        #map {
-            width: 100%;
-            height: 100vh;
-        }
-
-        .panel {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            width: 280px;
+            width: 320px;
+            max-height: 88vh;
+            overflow-y: auto;
             background: white;
             z-index: 1000;
             padding: 18px;
@@ -108,10 +58,26 @@
             font-size: 15px;
         }
 
+        #routeInfo {
+            font-size: 14px;
+            line-height: 1.55;
+            font-weight: bold;
+            white-space: pre-line;
+        }
+
         .legend {
             margin-top: 12px;
             font-size: 13px;
-            line-height: 1.6;
+            line-height: 1.7;
+        }
+
+        .score-box {
+            background: #f2f6ff;
+            padding: 10px;
+            border-radius: 10px;
+            margin: 10px 0;
+            font-size: 13px;
+            line-height: 1.5;
         }
     </style>
 </head>
@@ -122,6 +88,12 @@
     <h2>안전 귀가 지도</h2>
     <p id="status">데이터 불러오는 중...</p>
 
+    <div class="score-box">
+        <b>안전 점수 기준</b><br>
+        가로등 1점 / CCTV 2점 / 안심벨 3점<br>
+        소방서 10점 / 경찰서 20점
+    </div>
+
     <button id="startBtn">출발지 선택</button>
     <button id="endBtn">목적지 선택</button>
 
@@ -130,12 +102,18 @@
     <label><input type="checkbox" id="cctvCheck" checked> CCTV 표시</label>
     <label><input type="checkbox" id="streetlightCheck" checked> 가로등 표시</label>
     <label><input type="checkbox" id="safetybellCheck" checked> 안심벨 표시</label>
+    <label><input type="checkbox" id="policeCheck" checked> 경찰서 표시</label>
+    <label><input type="checkbox" id="firestationCheck" checked> 소방서 표시</label>
 
     <div class="legend">
         🔵 CCTV<br>
         🟠 가로등<br>
         🟢 안심벨<br>
-        🔴 선택 경로
+        🟣 경찰서<br>
+        🔴 소방서<br>
+        🟩 안전 점수 1위 경로<br>
+        🟧 안전 점수 2위 경로<br>
+        🟥 안전 점수 3위 경로
     </div>
 </div>
 
@@ -148,14 +126,22 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: 'OpenStreetMap'
 }).addTo(map);
 
+const SAFETY_WEIGHTS = {
+    cctv: 2,
+    streetlight: 1,
+    safetybell: 3,
+    police: 20,
+    firestation: 10
+};
+
 function makeCircleMarker(item, color, popupText) {
     return L.circleMarker([item.lat, item.lng], {
         radius: 5,
         color: color,
         fillColor: color,
-        fillOpacity: 0.7,
+        fillOpacity: 0.75,
         weight: 1
-    }).bindPopup(popupText);
+    }).bindPopup(item.name ? popupText + "<br>" + item.name : popupText);
 }
 
 function makeCluster(data, color, popupText) {
@@ -168,6 +154,47 @@ function makeCluster(data, color, popupText) {
     return cluster;
 }
 
+function countFacilitiesAlongRoute(routeLatLngs, facilities, radiusMeter) {
+    let count = 0;
+
+    facilities.forEach(function(item) {
+        let facilityPoint = L.latLng(item.lat, item.lng);
+
+        for (let i = 0; i < routeLatLngs.length; i++) {
+            let routePoint = L.latLng(routeLatLngs[i][0], routeLatLngs[i][1]);
+
+            if (facilityPoint.distanceTo(routePoint) <= radiusMeter) {
+                count++;
+                break;
+            }
+        }
+    });
+
+    return count;
+}
+
+function calculateSafetyScore(routeLatLngs, data, radiusMeter) {
+    const counts = {
+        cctv: countFacilitiesAlongRoute(routeLatLngs, data.cctv, radiusMeter),
+        streetlight: countFacilitiesAlongRoute(routeLatLngs, data.streetlight, radiusMeter),
+        safetybell: countFacilitiesAlongRoute(routeLatLngs, data.safetybell, radiusMeter),
+        police: countFacilitiesAlongRoute(routeLatLngs, data.police, radiusMeter),
+        firestation: countFacilitiesAlongRoute(routeLatLngs, data.firestation, radiusMeter)
+    };
+
+    const score =
+        counts.cctv * SAFETY_WEIGHTS.cctv +
+        counts.streetlight * SAFETY_WEIGHTS.streetlight +
+        counts.safetybell * SAFETY_WEIGHTS.safetybell +
+        counts.police * SAFETY_WEIGHTS.police +
+        counts.firestation * SAFETY_WEIGHTS.firestation;
+
+    return {
+        counts: counts,
+        score: score
+    };
+}
+
 fetch("/static/safety_data.json")
     .then(function(response) {
         if (!response.ok) {
@@ -176,18 +203,27 @@ fetch("/static/safety_data.json")
         return response.json();
     })
     .then(function(data) {
+        data.police = data.police || [];
+        data.firestation = data.firestation || [];
+
         var cctvLayer = makeCluster(data.cctv, "blue", "CCTV");
         var streetlightLayer = makeCluster(data.streetlight, "orange", "가로등");
         var safetybellLayer = makeCluster(data.safetybell, "green", "안심벨");
+        var policeLayer = makeCluster(data.police, "purple", "경찰서");
+        var firestationLayer = makeCluster(data.firestation, "red", "소방서");
 
         map.addLayer(cctvLayer);
         map.addLayer(streetlightLayer);
         map.addLayer(safetybellLayer);
+        map.addLayer(policeLayer);
+        map.addLayer(firestationLayer);
 
         document.getElementById("status").innerText =
             "CCTV " + data.cctv.length + "개 / " +
             "가로등 " + data.streetlight.length + "개 / " +
-            "안심벨 " + data.safetybell.length + "개";
+            "안심벨 " + data.safetybell.length + "개\n" +
+            "경찰서 " + data.police.length + "개 / " +
+            "소방서 " + data.firestation.length + "개";
 
         document.getElementById("cctvCheck").addEventListener("change", function() {
             this.checked ? map.addLayer(cctvLayer) : map.removeLayer(cctvLayer);
@@ -201,10 +237,18 @@ fetch("/static/safety_data.json")
             this.checked ? map.addLayer(safetybellLayer) : map.removeLayer(safetybellLayer);
         });
 
+        document.getElementById("policeCheck").addEventListener("change", function() {
+            this.checked ? map.addLayer(policeLayer) : map.removeLayer(policeLayer);
+        });
+
+        document.getElementById("firestationCheck").addEventListener("change", function() {
+            this.checked ? map.addLayer(firestationLayer) : map.removeLayer(firestationLayer);
+        });
+
         let mode = null;
         let startMarker = null;
         let endMarker = null;
-        let routeLine = null;
+        let routeLines = [];
         let startPoint = null;
         let endPoint = null;
 
@@ -226,6 +270,11 @@ fetch("/static/safety_data.json")
                     map.removeLayer(startMarker);
                 }
 
+                routeLines.forEach(function(line) {
+                    map.removeLayer(line);
+                });
+                routeLines = [];
+
                 startMarker = L.marker(startPoint)
                     .addTo(map)
                     .bindPopup("출발지")
@@ -243,64 +292,132 @@ fetch("/static/safety_data.json")
                     map.removeLayer(endMarker);
                 }
 
+                routeLines.forEach(function(line) {
+                    map.removeLayer(line);
+                });
+                routeLines = [];
+
                 endMarker = L.marker(endPoint)
                     .addTo(map)
                     .bindPopup("목적지")
                     .openPopup();
 
                 mode = null;
-                drawRoute(data);
+                drawMultipleRoutes(data);
             }
         });
 
-        function drawRoute(data) {
+        function drawMultipleRoutes(data) {
             if (!startPoint || !endPoint) return;
 
-            if (routeLine) {
-                map.removeLayer(routeLine);
-            }
-
-            routeLine = L.polyline([startPoint, endPoint], {
-                color: "red",
-                weight: 5
-            }).addTo(map);
-
-            map.fitBounds(routeLine.getBounds());
-
-            let allSafeData = [
-                ...data.cctv,
-                ...data.streetlight,
-                ...data.safetybell
-            ];
-
-            let nearbyCount = countNearbyFacilities(
-                startPoint,
-                endPoint,
-                allSafeData,
-                300
-            );
-
             document.getElementById("routeInfo").innerText =
-                "경로 표시 완료 / 출발지·목적지 주변 300m 안전시설: " +
-                nearbyCount +
-                "개";
-        }
+                "여러 경로를 분석하는 중...";
 
-        function countNearbyFacilities(start, end, facilities, radiusMeter) {
-            let count = 0;
-
-            facilities.forEach(function(item) {
-                let point = L.latLng(item.lat, item.lng);
-
-                let distanceToStart = point.distanceTo(start);
-                let distanceToEnd = point.distanceTo(end);
-
-                if (distanceToStart <= radiusMeter || distanceToEnd <= radiusMeter) {
-                    count++;
-                }
+            routeLines.forEach(function(line) {
+                map.removeLayer(line);
             });
+            routeLines = [];
 
-            return count;
+            fetch("/route", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    start: {
+                        lat: startPoint.lat,
+                        lng: startPoint.lng
+                    },
+                    end: {
+                        lat: endPoint.lat,
+                        lng: endPoint.lng
+                    }
+                })
+            })
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error("경로 API 요청 실패");
+                }
+                return response.json();
+            })
+            .then(function(routeData) {
+                if (!routeData.routes || routeData.routes.length === 0) {
+                    throw new Error("경로를 찾지 못했습니다.");
+                }
+
+                let routeResults = [];
+
+                routeData.routes.forEach(function(route, index) {
+                    const routeLatLngs = route.coordinates.map(function(coord) {
+                        return [coord[1], coord[0]];
+                    });
+
+                    let safetyResult = calculateSafetyScore(
+                        routeLatLngs,
+                        data,
+                        300
+                    );
+
+                    routeResults.push({
+                        originalIndex: index,
+                        latlngs: routeLatLngs,
+                        distance: route.distance,
+                        duration: route.duration,
+                        score: safetyResult.score,
+                        counts: safetyResult.counts
+                    });
+                });
+
+                routeResults.sort(function(a, b) {
+                    return b.score - a.score;
+                });
+
+                const colors = ["green", "orange", "red"];
+
+                routeResults.forEach(function(result, i) {
+                    let line = L.polyline(result.latlngs, {
+                        color: colors[i] || "gray",
+                        weight: i === 0 ? 7 : 4,
+                        opacity: i === 0 ? 0.95 : 0.75
+                    }).addTo(map);
+
+                    line.bindPopup(
+                        (i + 1) + "위 경로<br>" +
+                        "안전 점수: " + result.score + "점<br>" +
+                        "거리: " + Math.round(result.distance) + "m<br>" +
+                        "예상 시간: " + Math.round(result.duration / 60) + "분"
+                    );
+
+                    routeLines.push(line);
+                });
+
+                map.fitBounds(
+                    L.polyline(routeResults[0].latlngs).getBounds()
+                );
+
+                let text = "경로 비교 결과\n\n";
+
+                routeResults.forEach(function(result, i) {
+                    text +=
+                        (i + 1) + "위 경로 " +
+                        (i === 0 ? "(추천)" : "") + "\n" +
+                        "안전 점수: " + result.score + "점\n" +
+                        "거리: " + Math.round(result.distance) + "m / " +
+                        "예상 시간: " + Math.round(result.duration / 60) + "분\n" +
+                        "CCTV " + result.counts.cctv + "개, " +
+                        "가로등 " + result.counts.streetlight + "개, " +
+                        "안심벨 " + result.counts.safetybell + "개, " +
+                        "경찰서 " + result.counts.police + "개, " +
+                        "소방서 " + result.counts.firestation + "개\n\n";
+                });
+
+                document.getElementById("routeInfo").innerText = text;
+            })
+            .catch(function(error) {
+                console.error(error);
+                document.getElementById("routeInfo").innerText =
+                    "경로를 불러오지 못했습니다. 출발지와 목적지를 다시 선택해보세요.";
+            });
         }
     })
     .catch(function(error) {
